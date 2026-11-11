@@ -171,7 +171,8 @@ async function waitForPlayerConnection(player, channel) {
 }
 
 async function startPlayback(player) {
-    await waitForPlayerConnection(player);
+    // ensurePlayer has already completed the voice handshake before tracks
+    // are resolved and queued.
     await player.play();
 }
 
@@ -278,8 +279,8 @@ export async function joinVoiceChannel(client, interaction) {
     guildData.playerChannelId = interaction.channel.id;
     player.setTextChannel(interaction.channel.id);
     player.setVolume(guildData.volume * 10);
-    await waitForPlayerConnection(player);
     await promoteBotOnStage(interaction.guild, channel);
+    await waitForPlayerConnection(player, channel);
 
     return successEmbed(
         'Joined Voice Channel',
