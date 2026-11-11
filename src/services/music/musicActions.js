@@ -66,16 +66,46 @@ async function promoteBotOnStage(guild, channel) {
     }
 
     try {
-        const botMember = guild.members.me || await guild.members.fetchMe();
-        const voiceState = botMember.voice;
+        let botMember = guild.members.me || await guild.members.fetchMe();
 
-        if (voiceState.channelId !== channel.id) {
-            throw new Error('The bot has not joined the Stage channel yet.');
+        // Discord sends the bot's voice-state update asynchronously after the
+        // Gateway join request. Wait for that update before trying to unsuppress.
+        if (botMember.voice.channelId !== channel.id) {
+            await new Promise((resolve, reject) => {
+                const client = guild.client;
+                const cleanup = () => {
+                    clearTimeout(timeout);
+                    client.off('voiceStateUpdate', onVoiceStateUpdate);
+                };
+                const onVoiceStateUpdate = (oldState, newState) => {
+                    if (newState.guild.id === guild.id
+                        && newState.id === client.user.id
+                        && newState.channelId === channel.id) {
+                        cleanup();
+                        resolve();
+                    }
+                };
+                const timeout = setTimeout(() => {
+                    cleanup();
+                    reject(new Error('Discord did not confirm that the bot joined the Stage channel. Check the GuildVoiceStates intent and Connect permission.'));
+                }, 8000);
+
+                client.on('voiceStateUpdate', onVoiceStateUpdate);
+
+                // Close the race where the voice-state update arrived just
+                // before the listener was attached.
+                if (guild.members.me?.voice.channelId === channel.id) {
+                    cleanup();
+                    resolve();
+                }
+            });
+            botMember = guild.members.me || await guild.members.fetchMe();
         }
 
-        if (voiceState.suppress) {
-            // A Stage moderator with Mute Members can unsuppress itself.
-            await voiceState.setSuppressed(false);
+        if (botMember.voice.suppress !== false) {
+            // Stage speaker promotion must happen before waiting for Lavalink's
+            // voice handshake, otherwise a Stage listener can stall playback.
+            await botMember.voice.setSuppressed(false);
         }
 
         return true;
@@ -83,12 +113,12 @@ async function promoteBotOnStage(guild, channel) {
         throw new TitanBotError(
             'Could not become a Stage speaker',
             ErrorTypes.PERMISSION,
-            `I joined **${channel.name}**, but Discord did not let me become a speaker. Make sure my role has **Connect**, **Mute Members**, **Manage Channels** and **Move Members** permissions in this Stage channel. Discord response: ${error?.message || 'unknown error'}`,
+            `I could not become a speaker in **${channel.name}**. For a Stage channel, grant the bot **Connect** and **Mute Members** (Stage Moderator) permissions, and make sure the channel is available. Discord response: ${error?.message || 'unknown error'}`,
         );
     }
 }
 
-async function waitForPlayerConnection(player) {
+async function waitForPlayerConnection(player, channel) {
     const connection = player?.connection;
     if (!connection) {
         throw new TitanBotError(
@@ -121,7 +151,9 @@ async function waitForPlayerConnection(player) {
                 throw new TitanBotError(
                     'Lavalink voice handshake timed out',
                     ErrorTypes.CONFIGURATION,
-                    `Lavalink node **${player.node?.name || 'unknown'}** did not confirm the voice connection. Check the node status and bot Connect/Speak permissions, then retry.`,
+                    channel?.type === ChannelType.GuildStageVoice
+                        ? `Lavalink node **${player.node?.name || 'unknown'}** did not confirm the Stage voice connection. Check that the bot joined as a speaker (Connect + Mute Members) and that the Lavalink node can connect to Discord voice.`
+                        : `Lavalink node **${player.node?.name || 'unknown'}** did not confirm the voice connection. Check the node status and bot Connect/Speak permissions, then retry.`,
                 );
             }
         }
@@ -131,7 +163,9 @@ async function waitForPlayerConnection(player) {
         throw new TitanBotError(
             'Voice connection not established',
             ErrorTypes.CONFIGURATION,
-            `Lavalink node **${player.node?.name || 'unknown'}** has not established the voice connection. Check the node status and bot Connect/Speak permissions, then retry.`,
+            channel?.type === ChannelType.GuildStageVoice
+                ? `Lavalink node **${player.node?.name || 'unknown'}** has not established the Stage voice connection. Check the Stage speaker permissions and Lavalink node status, then retry.`
+                : `Lavalink node **${player.node?.name || 'unknown'}** has not established the voice connection. Check the node status and bot Connect/Speak permissions, then retry.`,
         );
     }
 }
@@ -203,8 +237,8 @@ export async function ensurePlayer(client, interaction) {
     player.setTextChannel(interaction.channel.id);
     // Music settings are stored as a percentage (0–100); Lavalink expects 0–1000.
     player.setVolume(guildData.volume * 10);
-    await waitForPlayerConnection(player);
     await promoteBotOnStage(interaction.guild, channel);
+    await waitForPlayerConnection(player, channel);
     return { player, guildData };
 }
 
