@@ -171,9 +171,50 @@ async function waitForPlayerConnection(player, channel) {
 }
 
 async function startPlayback(player) {
-    // ensurePlayer has already completed the voice handshake before tracks
-    // are resolved and queued.
-    await player.play();
+    // Riffy 1.0.12 Player.play() does not await the Lavalink REST request
+    // that actually starts the track. That can make /play report success
+    // while Lavalink rejects or never receives the playback request.
+    if (!player?.queue?.length) {
+        throw new TitanBotError(
+            'Empty music queue',
+            ErrorTypes.CONFIGURATION,
+            'There is no track ready to play.',
+        );
+    }
+
+    let track = player.queue.shift();
+    try {
+        if (!track.track) {
+            track = await track.resolve(player.riffy);
+        }
+
+        if (!track?.track) {
+            throw new Error('The selected track has no encoded Lavalink track data.');
+        }
+
+        // Await the actual REST request so HTTP/auth/node errors reach /play.
+        await player.node.rest.updatePlayer({
+            guildId: player.guildId,
+            data: {
+                track: { encoded: track.track },
+                paused: false,
+            },
+        });
+
+        player.current = track;
+        player.playing = true;
+        player.paused = false;
+        player.position = 0;
+    } catch (error) {
+        // Put the track back so a transient Lavalink failure does not lose it.
+        player.queue.unshift(track);
+        player.playing = false;
+        throw new TitanBotError(
+            'Lavalink could not start playback',
+            ErrorTypes.CONFIGURATION,
+            `Lavalink node **${player.node?.name || 'unknown'}** rejected the playback request: ${error?.message || error}. Check the node's REST/API status and credentials.`,
+        );
+    }
 }
 
 export function getPlayer(client, guildId) {
