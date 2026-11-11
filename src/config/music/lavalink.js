@@ -18,8 +18,7 @@ function parseNodesFromEnv() {
     }
 
     try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : null;
+        return parseNodesPayload(JSON.parse(raw));
     } catch {
         return null;
     }
@@ -52,9 +51,33 @@ function loadNodesFromFile() {
 }
 
 export function getLavalinkNodes() {
+    // Explicit JSON configuration has the highest priority.
     const fromJson = parseNodesFromEnv();
     if (fromJson?.length) {
         return fromJson;
+    }
+
+    // A configured single node must override the bundled public-node fallback.
+    const host = process.env.LAVALINK_HOST?.trim();
+    if (host) {
+        const secure = parseBoolean(process.env.LAVALINK_SECURE, false);
+        const port = Number(process.env.LAVALINK_PORT || (secure ? 443 : 2333));
+        const password = process.env.LAVALINK_PASSWORD?.trim();
+
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+            throw new Error('LAVALINK_PORT must be an integer between 1 and 65535.');
+        }
+        if (!password) {
+            throw new Error('LAVALINK_PASSWORD is required when LAVALINK_HOST is configured.');
+        }
+
+        return [{
+            host,
+            port,
+            password,
+            secure,
+            name: process.env.LAVALINK_NAME || 'Main',
+        }];
     }
 
     const fromFile = loadNodesFromFile();
@@ -62,17 +85,12 @@ export function getLavalinkNodes() {
         return fromFile;
     }
 
-    const host = process.env.LAVALINK_HOST || 'localhost';
-    const port = Number(process.env.LAVALINK_PORT || 2333);
-    const password = process.env.LAVALINK_PASSWORD || 'youshallnotpass';
-    const secure = parseBoolean(process.env.LAVALINK_SECURE, false);
-
     return [{
-        host,
-        port,
-        password,
-        secure,
-        name: process.env.LAVALINK_NAME || 'Main',
+        host: 'localhost',
+        port: 2333,
+        password: 'youshallnotpass',
+        secure: false,
+        name: 'Main',
     }];
 }
 

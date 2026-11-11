@@ -54,33 +54,49 @@ function assertBotVoicePermissions(channel) {
 }
 
 async function waitForPlayerConnection(player) {
-    if (player.connected) {
-        return;
+    const connection = player?.connection;
+    if (!connection) {
+        throw new TitanBotError(
+            'Voice connection unavailable',
+            ErrorTypes.CONFIGURATION,
+            'The music player has no active voice connection. Run /join and try again.',
+        );
     }
 
     try {
-        await player.connection.resolve();
-    } catch {
-        // Fall through to event-based wait below.
-    }
-
-    if (player.connected) {
-        return;
-    }
-
-    try {
-        await once(player, 'connectionRestored', {
-            signal: AbortSignal.timeout(PLAYER_CONNECT_TIMEOUT_MS),
-        });
-    } catch {
-        // Timed out waiting for Lavalink to confirm the voice session.
-    }
-
-    if (!player.connected) {
+        // Riffy 1.0.12 resolves Discord's session + server credentials here.
+        await connection.resolve();
+    } catch (error) {
         throw new TitanBotError(
             'Voice connection failed',
             ErrorTypes.CONFIGURATION,
-            'Could not connect to the voice channel. Ensure Lavalink is online, the bot has Connect and Speak permissions, then try again.',
+            `Could not receive Discord voice credentials through Lavalink node **${player.node?.name || 'unknown'}**. ${error?.message || 'Connection timed out.'}`,
+        );
+    }
+
+    // Player.connected is set optimistically by createConnection(). It is not
+    // proof that Lavalink has acknowledged the Discord voice session.
+    if (connection.establishing) {
+        try {
+            await once(player, 'connectionRestored', {
+                signal: AbortSignal.timeout(PLAYER_CONNECT_TIMEOUT_MS),
+            });
+        } catch {
+            if (connection.establishing || !player.connected) {
+                throw new TitanBotError(
+                    'Lavalink voice handshake timed out',
+                    ErrorTypes.CONFIGURATION,
+                    `Lavalink node **${player.node?.name || 'unknown'}** did not confirm the voice connection. Check the node status and bot Connect/Speak permissions, then retry.`,
+                );
+            }
+        }
+    }
+
+    if (!connection.isReady || !player.connected) {
+        throw new TitanBotError(
+            'Voice connection not established',
+            ErrorTypes.CONFIGURATION,
+            `Lavalink node **${player.node?.name || 'unknown'}** has not established the voice connection. Check the node status and bot Connect/Speak permissions, then retry.`,
         );
     }
 }
@@ -131,19 +147,26 @@ export async function ensurePlayer(client, interaction) {
 
     const guildId = interaction.guild.id;
     const guildData = getGuildMusicData(guildId);
+    const channel = interaction.member.voice.channel;
+    assertBotVoicePermissions(channel);
+
     let player = getPlayer(client, guildId);
 
     if (!player) {
         player = client.riffy.createConnection({
             guildId,
-            voiceChannel: interaction.member.voice.channel.id,
+            voiceChannel: channel.id,
             textChannel: interaction.channel.id,
             deaf: true,
         });
         guildData.playerChannelId = interaction.channel.id;
+    } else if (player.voiceChannel !== channel.id) {
+        player.setVoiceChannel(channel.id);
     }
 
-    player.setVolume(guildData.volume);
+    player.setTextChannel(interaction.channel.id);
+    // Music settings are stored as a percentage (0–100); Lavalink expects 0–1000.
+    player.setVolume(guildData.volume * 10);
     return { player, guildData };
 }
 
@@ -160,6 +183,7 @@ function isDuplicateTrack(player, track) {
 
 export async function joinVoiceChannel(client, interaction) {
     assertRiffyAvailable(client);
+    assertLavalinkNodeAvailable(client);
     assertInVoice(interaction.member);
 
     const guildId = interaction.guild.id;
@@ -187,7 +211,9 @@ export async function joinVoiceChannel(client, interaction) {
         guildData.playerChannelId = interaction.channel.id;
     }
 
-    player.setVolume(guildData.volume);
+    player.setTextChannel(interaction.channel.id);
+    player.setVolume(guildData.volume * 10);
+    await waitForPlayerConnection(player);
 
     return successEmbed(
         'Joined Voice Channel',
@@ -420,7 +446,7 @@ export async function setVolume(client, interaction, volume) {
 
     const guildData = getGuildMusicData(interaction.guild.id);
     guildData.volume = Math.max(0, Math.min(100, volume));
-    player.setVolume(guildData.volume);
+    player.setVolume(guildData.volume * 10);
     await refreshPlayerMessage(client, interaction.guild.id);
     return successEmbed('Volume Updated', `Volume set to **${guildData.volume}%**.`);
 }

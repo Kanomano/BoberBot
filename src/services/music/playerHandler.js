@@ -72,52 +72,59 @@ export function setupPlayerHandler(client) {
         return;
     }
 
-    // Lavalink nodes often flap (reconnect -> error -> reconnect). Throttle all
-    // per-node messages to one line per interval, log the first connect only,
-    // and skip reconnect noise entirely since it is meaningless during flapping.
+    // Throttle repeated reports per node + event type, but keep reconnects,
+    // HTTP status codes and disconnect reasons visible for troubleshooting.
     const nodeLogState = new Map();
-    const NODE_LOG_INTERVAL_MS = 5 * 60 * 1000;
+    const NODE_LOG_INTERVAL_MS = 30 * 1000;
 
-    const shouldLogNodeEvent = (nodeName) => {
-        const prev = nodeLogState.get(nodeName) ?? { lastLogAt: 0, hasConnected: false };
+    const shouldLogNodeEvent = (nodeName, eventType) => {
+        const key = `${nodeName}:${eventType}`;
+        const lastLogAt = nodeLogState.get(key) || 0;
         const now = Date.now();
-        if (now - prev.lastLogAt < NODE_LOG_INTERVAL_MS) {
+        if (now - lastLogAt < NODE_LOG_INTERVAL_MS) {
             return false;
         }
-        nodeLogState.set(nodeName, { ...prev, lastLogAt: now });
+        nodeLogState.set(key, now);
         return true;
     };
 
-    const markNodeConnected = (nodeName) => {
-        const prev = nodeLogState.get(nodeName) ?? { lastLogAt: 0, hasConnected: false };
-        nodeLogState.set(nodeName, { ...prev, hasConnected: true });
-    };
+    const getNodeName = (node) => node?.name || node?.host || 'unknown';
 
     client.riffy.on('nodeConnect', (node) => {
-        const prev = nodeLogState.get(node.name) ?? { lastLogAt: 0, hasConnected: false };
-        if (prev.hasConnected) {
-            return;
-        }
-        markNodeConnected(node.name);
-        logger.info(`Lavalink node "${node.name}" connected.`);
+        logger.info(`Lavalink node "${getNodeName(node)}" connected.`);
     });
 
-    client.riffy.on('nodeReconnect', () => {
-        // Intentionally silent — reconnect spam is not actionable during flapping.
+    client.riffy.on('nodeReconnect', (node) => {
+        const name = getNodeName(node);
+        if (shouldLogNodeEvent(name, 'reconnect')) {
+            logger.warn(`Lavalink node "${name}" is reconnecting (attempt ${node?.reconnectAttempted ?? 'unknown'}).`);
+        }
     });
 
     client.riffy.on('nodeError', (node, error) => {
-        if (!shouldLogNodeEvent(node.name)) {
+        const name = getNodeName(node);
+        if (!shouldLogNodeEvent(name, 'error')) {
             return;
         }
-        logger.warn(`Lavalink node "${node.name}" error: ${error?.message || error}`);
+        const status = error?.statusCode || error?.status || error?.response?.status;
+        const code = error?.code;
+        const details = [
+            status ? `HTTP ${status}` : null,
+            code ? `code ${code}` : null,
+        ].filter(Boolean).join(', ');
+        logger.error(`Lavalink node "${name}" error${details ? ` (${details})` : ''}: ${error?.message || error}`);
     });
 
-    client.riffy.on('nodeDisconnect', (node) => {
-        if (!shouldLogNodeEvent(node.name)) {
+    client.riffy.on('nodeDisconnect', (node, details) => {
+        const name = getNodeName(node);
+        if (!shouldLogNodeEvent(name, 'disconnect')) {
             return;
         }
-        logger.warn(`Lavalink node "${node.name}" disconnected.`);
+        const code = details?.event;
+        const reason = details?.reason;
+        logger.warn(
+            `Lavalink node "${name}" disconnected${code ? ` (code ${code})` : ''}${reason ? `: ${reason}` : ''}.`
+        );
     });
 
     client.riffy.on('trackStart', async (player, track) => {
@@ -158,7 +165,7 @@ export function setupPlayerHandler(client) {
             clearUpdateInterval(guildData);
 
             if (guildData.autoplay) {
-                player.autoplay(player);
+                await player.autoplay(player);
                 return;
             }
 

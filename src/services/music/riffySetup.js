@@ -39,6 +39,27 @@ export function initializeMusic(client) {
 
     setupPlayerHandler(client);
 
+    // Enable with MUSIC_DEBUG=true. Redact voice tokens before writing Riffy's
+    // low-level diagnostics to logs.
+    client.riffy.on('debug', (...parts) => {
+        if (process.env.MUSIC_DEBUG !== 'true') {
+            return;
+        }
+        const message = parts
+            .map((part) => {
+                if (typeof part === 'string') return part;
+                try {
+                    return JSON.stringify(part);
+                } catch {
+                    return String(part);
+                }
+            })
+            .join(' ')
+            .replace(/("token"\s*:\s*")[^"]+(")/gi, '$1[REDACTED]$2')
+            .replace(/(authorization\s*[:=]\s*)[^\s,}]+/gi, '$1[REDACTED]');
+        logger.debug(`[Riffy] ${message}`);
+    });
+
     client.on('raw', (packet) => {
         if (
             ![
@@ -48,7 +69,9 @@ export function initializeMusic(client) {
         ) {
             return;
         }
-        client.riffy.updateVoiceState(packet);
+        client.riffy.updateVoiceState(packet).catch((error) => {
+            logger.error(`Failed to process Discord ${packet.t} packet for Lavalink:`, error);
+        });
     });
 
     client.riffy.on('playerError', (player, error) => {
