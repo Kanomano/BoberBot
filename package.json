@@ -5,15 +5,7 @@
   "main": "src/app.js",
   "type": "module",
   "scripts": {
-    "start": "node src/app.js",
-    "migrate": "node scripts/migrate.js apply",
-    "migrate:check": "node scripts/migrate.js check",
-    "migrate:status": "node scripts/migrate.js status",
-    "migrate:keys": "node scripts/migrate-keys.js",
-    "migrate:keys:dry": "node scripts/migrate-keys.js --dry-run",
-    "backup:db": "node scripts/backup.js",
-    "restore:db": "node scripts/restore.js",
-    "backup:drill": "node scripts/restore-drill.js"
+    "start": "node src/app.js"
   },
   "dependencies": {
     "@discordjs/rest": "^2.6.1",
@@ -22,7 +14,6 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "node-cron": "^4.2.1",
-    "pg": "^8.11.3",
     "winston": "^3.19.0",
     "winston-daily-rotate-file": "^5.0.0",
     "zod": "^3.25.76",
