@@ -164,6 +164,7 @@ export async function ensurePlayer(client, interaction) {
         player.setVoiceChannel(channel.id);
     }
 
+    guildData.playerChannelId = interaction.channel.id;
     player.setTextChannel(interaction.channel.id);
     // Music settings are stored as a percentage (0–100); Lavalink expects 0–1000.
     player.setVolume(guildData.volume * 10);
@@ -192,15 +193,6 @@ export async function joinVoiceChannel(client, interaction) {
     assertBotVoicePermissions(channel);
     let player = getPlayer(client, guildId);
 
-    if (player && player.voiceChannel !== channel.id) {
-        try {
-            player.destroy();
-        } catch {
-            // player may already be gone
-        }
-        player = null;
-    }
-
     if (!player) {
         player = client.riffy.createConnection({
             guildId,
@@ -208,9 +200,11 @@ export async function joinVoiceChannel(client, interaction) {
             textChannel: interaction.channel.id,
             deaf: true,
         });
-        guildData.playerChannelId = interaction.channel.id;
+    } else if (player.voiceChannel !== channel.id) {
+        player.setVoiceChannel(channel.id);
     }
 
+    guildData.playerChannelId = interaction.channel.id;
     player.setTextChannel(interaction.channel.id);
     player.setVolume(guildData.volume * 10);
     await waitForPlayerConnection(player);
