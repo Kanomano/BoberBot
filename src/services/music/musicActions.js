@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { MessageFlags, PermissionFlagsBits } from 'discord.js';
+import { ChannelType, MessageFlags, PermissionFlagsBits } from 'discord.js';
 import { successEmbed } from '../../utils/embeds.js';
 import { InteractionHelper } from '../../utils/interactionHelper.js';
 import { botHasPermission } from '../../utils/permissionGuard.js';
@@ -44,11 +44,46 @@ function assertBotVoicePermissions(channel) {
         );
     }
 
-    if (!botHasPermission(channel, [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
+    const isStage = channel.type === ChannelType.GuildStageVoice;
+    const requiredPermissions = isStage
+        ? [PermissionFlagsBits.Connect, PermissionFlagsBits.MuteMembers]
+        : [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak];
+
+    if (!botHasPermission(channel, requiredPermissions)) {
         throw new TitanBotError(
             'Missing voice permissions',
             ErrorTypes.PERMISSION,
-            'I need **Connect** and **Speak** permissions in your voice channel.',
+            isStage
+                ? 'To speak on a Stage channel I need **Connect** and **Mute Members** permissions (Stage Moderator access) in that channel.'
+                : 'I need **Connect** and **Speak** permissions in your voice channel.',
+        );
+    }
+}
+
+async function promoteBotOnStage(guild, channel) {
+    if (channel.type !== ChannelType.GuildStageVoice) {
+        return false;
+    }
+
+    try {
+        const botMember = guild.members.me || await guild.members.fetchMe();
+        const voiceState = botMember.voice;
+
+        if (voiceState.channelId !== channel.id) {
+            throw new Error('The bot has not joined the Stage channel yet.');
+        }
+
+        if (voiceState.suppress) {
+            // A Stage moderator with Mute Members can unsuppress itself.
+            await voiceState.setSuppressed(false);
+        }
+
+        return true;
+    } catch (error) {
+        throw new TitanBotError(
+            'Could not become a Stage speaker',
+            ErrorTypes.PERMISSION,
+            `I joined **${channel.name}**, but Discord did not let me become a speaker. Make sure my role has **Connect**, **Mute Members**, **Manage Channels** and **Move Members** permissions in this Stage channel. Discord response: ${error?.message || 'unknown error'}`,
         );
     }
 }
@@ -168,6 +203,8 @@ export async function ensurePlayer(client, interaction) {
     player.setTextChannel(interaction.channel.id);
     // Music settings are stored as a percentage (0–100); Lavalink expects 0–1000.
     player.setVolume(guildData.volume * 10);
+    await waitForPlayerConnection(player);
+    await promoteBotOnStage(interaction.guild, channel);
     return { player, guildData };
 }
 
@@ -208,6 +245,7 @@ export async function joinVoiceChannel(client, interaction) {
     player.setTextChannel(interaction.channel.id);
     player.setVolume(guildData.volume * 10);
     await waitForPlayerConnection(player);
+    await promoteBotOnStage(interaction.guild, channel);
 
     return successEmbed(
         'Joined Voice Channel',
