@@ -227,7 +227,7 @@ export async function ensurePlayer(client, interaction) {
             guildId,
             voiceChannel: channel.id,
             textChannel: interaction.channel.id,
-            deaf: true,
+            deaf: channel.type !== ChannelType.GuildStageVoice,
         });
         guildData.playerChannelId = interaction.channel.id;
     } else if (player.voiceChannel !== channel.id) {
@@ -270,7 +270,7 @@ export async function joinVoiceChannel(client, interaction) {
             guildId,
             voiceChannel: channel.id,
             textChannel: interaction.channel.id,
-            deaf: true,
+            deaf: channel.type !== ChannelType.GuildStageVoice,
         });
     } else if (player.voiceChannel !== channel.id) {
         player.setVoiceChannel(channel.id);
@@ -302,6 +302,9 @@ export async function playQuery(client, interaction, query) {
     const result = await client.riffy.resolve({
         query,
         requester: interaction.user,
+        // Resolve on the same Lavalink node that owns this guild's player.
+        // Encoded tracks should not be handed between unrelated public nodes.
+        node: player.node,
     });
 
     const { loadType, tracks, playlistInfo } = result;
