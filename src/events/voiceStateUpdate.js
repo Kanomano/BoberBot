@@ -22,7 +22,15 @@ const MAX_TRACKED_COOLDOWNS = 10000;
 export default {
     name: 'voiceStateUpdate',
     async execute(oldState, newState, client) {
-        if (newState.member.user.bot) return;
+        // Music voice handling is independent from Join-to-Create and its storage.
+        // Run it first so JTC's disabled/empty-config early return cannot skip it.
+        if ( client.config?.features?.music) {
+            handleMusicVoiceState(client, oldState, newState).catch((error) => {
+                logger.error('Music voice state handler error:', error);
+            });
+        }
+
+        if (newState.member?.user?.bot) return;
 
         const guildId = newState.guild.id;
         const userId = newState.member.id;
@@ -285,11 +293,6 @@ userLimit: userLimit === 0 ? undefined : userLimit,
             }
         }
 
-        if (client.config?.features?.music) {
-            handleMusicVoiceState(client, oldState, newState).catch((error) => {
-                logger.error('Music voice state handler error:', error);
-            });
-        }
     }
 };
 
