@@ -28,7 +28,7 @@ export async function readGuildConfig(client, guildId, context = {}) {
         }
 
         if (typeof client.db.isAvailable === 'function' && !client.db.isAvailable()) {
-            logger.warn(`Persistent storage unavailable for readGuildConfig in guild ${guildId}`, {
+            logger.warn(`PostgreSQL unavailable for readGuildConfig in guild ${guildId}`, {
                 traceId: context.traceId,
                 guildId,
             });

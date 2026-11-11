@@ -1,5 +1,6 @@
 // database.js — facade re-exporting split modules for backward compatibility
 
+import { pgDb } from './postgresDatabase.js';
 import { logger } from './logger.js';
 import { BotConfig, getDefaultApplicationQuestions } from '../config/bot.js';
 
@@ -83,18 +84,22 @@ export async function insertVerificationAudit(record) {
             await db.initialize();
         }
 
+        if (db.isAvailable() && typeof pgDb.insertVerificationAudit === 'function') {
+            return await pgDb.insertVerificationAudit(record);
+        }
+
         const key = `verification:audit:${record.guildId}`;
         const existing = await getFromDb(key, []);
         const auditEntries = Array.isArray(existing) ? existing : [];
-        const maxAuditEntries = BotConfig?.verification?.maxInMemoryAuditEntries ?? 1000;
+        const maxInMemoryAuditEntries = BotConfig?.verification?.maxInMemoryAuditEntries ?? 1000;
 
         auditEntries.push({
             ...record,
             createdAt: record.createdAt || new Date().toISOString()
         });
 
-        if (auditEntries.length > maxAuditEntries) {
-            auditEntries.splice(0, auditEntries.length - maxAuditEntries);
+        if (auditEntries.length > maxInMemoryAuditEntries) {
+            auditEntries.splice(0, auditEntries.length - maxInMemoryAuditEntries);
         }
 
         await setInDb(key, auditEntries);
@@ -119,6 +124,8 @@ export function unwrapReplitData(data) {
 
 // Guild config access: import from services/config/guildConfig.js only.
 // Low-level storage lives in ./database/guildConfigStorage.js
+
+export { pgDb };
 
 export const getMessage = (key, replacements = {}) => {
     let message = BotConfig.messages[key] || key;
@@ -206,6 +213,14 @@ export function getMonthName(monthNum) {
     return monthNum >= 1 && monthNum <= 12 ? months[index] : 'Invalid Month';
 }
 
+function isPostgresSqlReady(dbWrapper) {
+    return Boolean(
+        dbWrapper?.db?.pool &&
+        typeof dbWrapper.db.isAvailable === 'function' &&
+        dbWrapper.db.isAvailable(),
+    );
+}
+
 async function getEndedGiveawaysFromKv(client) {
     const wrapper = client?.db;
     if (!wrapper || typeof wrapper.list !== 'function' || typeof wrapper.get !== 'function') {
@@ -255,27 +270,67 @@ async function getEndedGiveawaysFromKv(client) {
 
 export async function getEndedGiveaways(client) {
     try {
+        const wrapper = client?.db;
+        if (!wrapper || typeof wrapper.get !== 'function') {
+            return [];
+        }
+
+        if (isPostgresSqlReady(wrapper)) {
+            const { pgConfig } = await import('../config/database/postgres.js');
+
+            const result = await wrapper.db.pool.query(
+                `SELECT id, guild_id, message_id, data, ends_at 
+                 FROM ${pgConfig.tables.giveaways} 
+                 WHERE ends_at <= NOW() 
+                 AND COALESCE((data->>'ended')::boolean, false) = false
+                 ORDER BY ends_at ASC`,
+            );
+
+            return result.rows || [];
+        }
+
+        if (wrapper.isDegraded?.()) {
+            logger.debug('Postgres SQL unavailable for ended giveaways; scanning key-value store');
+        }
+
         return await getEndedGiveawaysFromKv(client);
     } catch (error) {
-        logger.error('Error getting ended giveaways from persistent storage:', error);
-        return [];
+        logger.error('Error getting ended giveaways:', error);
+        try {
+            return await getEndedGiveawaysFromKv(client);
+        } catch {
+            return [];
+        }
     }
 }
 
 export async function markGiveawayEnded(client, giveawayId, endedData) {
     try {
-        if (!client?.db || typeof client.db.get !== 'function') {
+        const wrapper = client?.db;
+        if (!wrapper || typeof wrapper.get !== 'function') {
             return false;
         }
 
+        if (isPostgresSqlReady(wrapper)) {
+            const { pgConfig } = await import('../config/database/postgres.js');
+
+            await wrapper.db.pool.query(
+                `UPDATE ${pgConfig.tables.giveaways} 
+                 SET data = $1, updated_at = NOW() 
+                 WHERE id = $2`,
+                [endedData, giveawayId],
+            );
+
+            return true;
+        }
+
         const guildId = endedData?.guildId;
-        const messageId = endedData?.messageId || giveawayId;
-        if (!guildId || !messageId) {
+        if (!guildId || !endedData?.messageId) {
             return false;
         }
 
         const { saveGiveaway } = await import('./giveaways.js');
-        return await saveGiveaway(client, guildId, { ...endedData, messageId });
+        return saveGiveaway(client, guildId, endedData);
     } catch (error) {
         logger.error('Error marking giveaway as ended:', error);
         return false;
