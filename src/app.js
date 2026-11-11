@@ -16,7 +16,6 @@ import { runSafeTask, handleTaskError, ErrorCodes } from './utils/errorHandler.j
 import { initializeMusic } from './services/music/riffySetup.js';
 import { shutdownMusic } from './services/music/playerHandler.js';
 import pkg from '../package.json' with { type: 'json' };
-import { EXPECTED_SCHEMA_VERSION, EXPECTED_SCHEMA_LABEL } from './config/database/schemaVersion.js';
 
 class TitanBot extends Client {
   constructor() {
@@ -53,25 +52,12 @@ class TitanBot extends Client {
       startupLog('Starting TitanBot...');
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      startupLog('Initializing database...');
+      startupLog('Initializing persistent JSON storage...');
       const dbInstance = await initializeDatabase();
       this.db = dbInstance.db;
 
-      // Check database status and report
       const dbStatus = this.db.getStatus();
-      if (dbStatus.isDegraded) {
-        logger.warn('');
-        logger.warn('╔═══════════════════════════════════════════════════════╗');
-        logger.warn('║ ⚠️  DATABASE RUNNING IN DEGRADED MODE                 ║');
-        logger.warn('║                                                       ║');
-        logger.warn('║ Connection: In-Memory Storage (PostgreSQL unavailable)║');
-        logger.warn('║ Data Persistence: DISABLED - data lost on restart    ║');
-        logger.warn('║ Action Required: Fix PostgreSQL and restart bot      ║');
-        logger.warn('╚═══════════════════════════════════════════════════════╝');
-        logger.warn('');
-      } else {
-        startupLog(`✅ Database Status: ${dbStatus.connectionType} (fully operational)`);
-      }
+      startupLog(`✅ Storage: ${dbStatus.connectionType} | persistent: ${dbStatus.isPersistent ? 'yes' : 'no'} | data: ${dbStatus.dataDirectory}`);
       
       startupLog('Starting web server...');
       this.startWebServer();
@@ -94,9 +80,7 @@ class TitanBot extends Client {
       await this.registerCommands();
       startupLog('Slash commands registration complete');
       
-      const databaseMode = dbStatus.isDegraded
-        ? 'Optional in-memory mode (data resets after restart)'
-        : 'Connected (persistent data enabled)';
+      const databaseMode = 'Persistent JSON file storage';
       const handlerSummary = `${this.buttons.size} buttons, ${this.selectMenus.size} menus, ${this.modals.size} modals`;
       startupLog(
         `ONLINE ✅ | ${this.commands.size} commands loaded | ${handlerSummary} | Database: ${databaseMode}`
@@ -173,7 +157,7 @@ class TitanBot extends Client {
 
     app.get('/ready', (req, res) => {
       const dbStatus = this.db?.getStatus?.() || { isDegraded: true, connectionType: 'none' };
-      const isReady = this.isReady() && !dbStatus.isDegraded;
+      const isReady = this.isReady() && dbStatus.isAvailable;
 
       const metrics = {
         guildCount: this.guilds?.cache?.size ?? 0,
@@ -183,8 +167,6 @@ class TitanBot extends Client {
           degraded: dbStatus.isDegraded,
           degradedReason: dbStatus.degradedReason ?? null,
         },
-        schemaVersion: EXPECTED_SCHEMA_VERSION,
-        schemaLabel: EXPECTED_SCHEMA_LABEL,
       };
 
       if (isReady) {
@@ -197,7 +179,7 @@ class TitanBot extends Client {
 
       res.status(503).json({
         ready: false,
-        reason: !this.isReady() ? 'Bot not Ready' : 'Database degraded',
+        reason: !this.isReady() ? 'Bot not Ready' : 'Persistent storage unavailable',
         metrics,
       });
     });
@@ -352,17 +334,13 @@ class TitanBot extends Client {
         logger.info('✅ Web server closed');
       }
 
-      // Close database connection
-      // Close database connection
-      if (this.db && this.db.db) {
-        logger.info('Closing database connection...');
+      if (this.db?.db?.close) {
+        logger.info('Flushing persistent JSON storage...');
         try {
-          if (this.db.db.pool) {
-            await this.db.db.pool.end();
-            logger.info('✅ Database connection closed');
-          }
+          await this.db.db.close();
+          logger.info('✅ Persistent storage flushed');
         } catch (error) {
-          logger.warn('Error closing database pool:', error.message);
+          logger.warn('Error flushing persistent storage:', error.message);
         }
       }
 

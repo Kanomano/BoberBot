@@ -981,15 +981,11 @@ async function handleDeleteSystem(btnInteraction, rootInteraction, guildConfig, 
     }
 
     try {
-        const { pgConfig } = await import('../../../config/database/postgres.js');
-        if (client.db?.db?.pool && typeof client.db.db.isAvailable === 'function' && client.db.db.isAvailable()) {
-            await client.db.db.pool.query(
-                `DELETE FROM ${pgConfig.tables.tickets} WHERE guild_id = $1`,
-                [guildId]
-            );
-        }
+        const ticketPrefix = `guild:${guildId}:ticket:`;
+        const ticketKeys = await client.db.list(ticketPrefix);
+        await Promise.all(ticketKeys.map((key) => client.db.delete(key)));
     } catch (ticketDeleteError) {
-        logger.warn('Could not clear ticket records from database:', ticketDeleteError.message);
+        logger.warn('Could not clear ticket records from persistent storage:', ticketDeleteError.message);
     }
 
     for (const key of keysToDelete) {

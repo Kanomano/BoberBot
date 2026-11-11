@@ -58,13 +58,9 @@ const DISCORD_PERMISSION_CODES = new Set([
     160002, // Cannot reply without permission to read message history
 ]);
 
-// PostgreSQL / node-postgres error codes and errno values that indicate database trouble.
+// Filesystem errors that can prevent persistent JSON records from being saved.
 const DATABASE_ERROR_CODES = new Set([
-    'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT',
-    '57014', // query_canceled (statement timeout)
-    '53300', // too_many_connections
-    '08006', '08001', '08003', // connection failures
-    '40001', '40P01', // serialization failure / deadlock
+    'EACCES', 'EPERM', 'ENOSPC', 'EIO', 'EMFILE', 'EBADF',
 ]);
 
 const TECHNICAL_ERROR_PATTERNS = [

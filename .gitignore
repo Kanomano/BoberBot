@@ -144,3 +144,6 @@ dist
 # Database backup artifacts
 backups/
 *.dump
+
+# Persistent bot data (never commit runtime user/server data)
+data/
