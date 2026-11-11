@@ -37,7 +37,7 @@ const ErrorCodeRegistry = Object.freeze({
   [ErrorCodes.DATABASE_ERROR]: {
     severity: 'high',
     retryable: true,
-    remediation: 'Check Postgres connectivity, pool saturation, statement timeouts, and recent migrations.'
+    remediation: 'Check the persistent data folder, free disk space, file permissions, and JSON storage files.'
   },
   [ErrorCodes.NETWORK_ERROR]: {
     severity: 'medium',
