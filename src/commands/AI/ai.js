@@ -109,7 +109,7 @@ export default {
         : answerText;
 
       await interaction.editReply({
-        content: `**Odpowiedź AI dla ${interaction.user.username}:**\n\n${visibleAnswer}`,
+        content: visibleAnswer,
         allowedMentions: { parse: [] },
       });
 
