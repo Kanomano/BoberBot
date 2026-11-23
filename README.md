@@ -38,13 +38,13 @@ Add `ANTHROPIC_API_KEY` as a Secret environment variable in your hosting panel. 
 
 AI commands:
 
-- `/ai ask` — ask Claude; optionally include recent channel messages and a member's basic public profile. Answers are posted publicly by default, with a private reply option.
+- `/ai ask` — write a natural-language request. Claude can choose Discord tools itself: inspect server details, list text channels, look up a member, check recently joined members, and read recent channel messages.
+- `/ai ask` can also prepare a message or a reaction-based poll. Publishing either requires confirmation from the person who invoked the command. The user needs Manage Messages or Manage Server permission for these publishing actions.
 - `/ai summarize` — summarize recent messages in the current channel. Private by default.
 - `/ai history` — view your own saved Claude conversations (only visible to you).
 - `/ai clear` — delete your own saved Claude conversation history.
-- `/ai user` — view a member's basic public Discord profile.
 
-Conversation history is stored separately for each user and server. The bot stores up to eight recent exchanges per user. Channel context is only included when explicitly requested with the `include_chat` option.
+Claude cannot perform moderation or destructive actions through these tools (such as bans, kicks, timeouts, role changes, or channel/permission changes). Discord tools only work in the current server and respect the bot's channel permissions. Conversation history is stored separately for each user and server, with up to eight recent exchanges per user.
 
 ## Data and restarts
 
