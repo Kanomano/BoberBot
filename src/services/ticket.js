@@ -677,7 +677,7 @@ async function generateTranscripts(channel, ticketData) {
         + '</td><td class="msg">' + escape(body).replace(/\n/g, '<br>') + '</td></tr>';
     }).join('\n');
 
-    const html = `<!DOCTYPE html>
+    const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -705,7 +705,7 @@ td{padding:9px;border-bottom:1px solid #484b51;vertical-align:top}
 </body>
 </html>`;
 
-    const html = new AttachmentBuilder(Buffer.from(html, 'utf8'), {
+    const html = new AttachmentBuilder(Buffer.from(htmlContent, 'utf8'), {
       name: 'ticket-' + channel.id + '.html',
     });
     const txt = new AttachmentBuilder(Buffer.from(plainLines.join('\n'), 'utf8'), {
