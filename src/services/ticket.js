@@ -620,15 +620,15 @@ function escapeHtml(text) {
     .replace(/'/g, '&#039;');
 }
 
-async function generateTranscript(channel) {
+async function generateTranscripts(channel, ticketData) {
   try {
-    logger.debug('Generating transcript for channel', {
+    logger.debug('Generating HTML and TXT transcripts for ticket', {
       channelId: channel.id,
-      channelName: channel.name
+      channelName: channel.name,
     });
 
     const messages = [];
-    let before = undefined;
+    let before;
     let batch;
     do {
       batch = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
@@ -639,18 +639,42 @@ async function generateTranscript(channel) {
 
     messages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
-    const escape = (str) =>
-      String(str ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+    const plainLines = [
+      'TICKET TRANSCRIPT',
+      'Ticket: ' + channel.name,
+      'Ticket ID: ' + ticketData.id,
+      'Guild: ' + channel.guild.name,
+      'Created/exported: ' + new Date().toISOString(),
+      'Messages: ' + messages.length,
+      '='.repeat(72),
+      '',
+    ];
 
-    const rows = messages.map((msg) => {
-      const ts = new Date(msg.createdTimestamp).toISOString().replace('T', ' ').slice(0, 19);
-      const author = escape(msg.author?.tag ?? msg.author?.username ?? 'Unknown');
-      const content = escape(msg.content || (msg.embeds.length ? '[embed]' : '[attachment]'));
-      return `<tr><td class="ts">${ts}</td><td class="author">${author}</td><td class="msg">${content}</td></tr>`;
+    const htmlRows = messages.map((msg) => {
+      const timestamp = new Date(msg.createdTimestamp).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+      const author = msg.author?.tag ?? msg.author?.username ?? 'Unknown';
+      const bodyParts = [];
+      if (msg.content?.trim()) bodyParts.push(msg.content.trim());
+      for (const embed of msg.embeds || []) {
+        const embedText = [
+          embed.title ? '[Embed title] ' + embed.title : '',
+          embed.description || '',
+          ...(embed.fields || []).map(field => field.name + ': ' + field.value),
+        ].filter(Boolean).join('\n');
+        if (embedText) bodyParts.push('[Embed]\n' + embedText);
+      }
+      for (const attachment of msg.attachments?.values?.() || []) {
+        bodyParts.push('[Attachment] ' + (attachment.name || 'file') + ': ' + attachment.url);
+      }
+      const body = bodyParts.join('\n\n') || (msg.embeds?.length ? '[Embed]' : '[No text content]');
+      plainLines.push('[' + timestamp + '] ' + author + ' (' + msg.author?.id + ')');
+      plainLines.push(body);
+      plainLines.push('-'.repeat(72));
+      plainLines.push('');
+
+      const escape = escapeHtml;
+      return '<tr><td class="ts">' + escape(timestamp) + '</td><td class="author">' + escape(author)
+        + '</td><td class="msg">' + escape(body).replace(/\n/g, '<br>') + '</td></tr>';
     }).join('\n');
 
     const html = `<!DOCTYPE html>
@@ -658,48 +682,51 @@ async function generateTranscript(channel) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Transcript – #${escape(channel.name)}</title>
+<title>Ticket transcript – #${escapeHtml(channel.name)}</title>
 <style>
-body{font-family:sans-serif;background:#36393f;color:#dcddde;margin:0;padding:16px}
-h1{color:#fff;font-size:1.2rem;margin-bottom:8px}
-table{width:100%;border-collapse:collapse;font-size:0.85rem}
-th{background:#2f3136;color:#8e9297;padding:6px 8px;text-align:left;border-bottom:2px solid #202225}
-td{padding:4px 8px;border-bottom:1px solid #40444b;vertical-align:top}
-.ts{color:#72767d;white-space:nowrap;width:160px}
-.author{color:#7289da;white-space:nowrap;width:160px}
-.msg{word-break:break-word}
+body{font-family:Arial,sans-serif;background:#36393f;color:#dcddde;margin:0;padding:20px}
+h1{color:#fff;font-size:1.25rem}
+.meta{color:#b9bbbe;margin-bottom:18px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{background:#2f3136;color:#b9bbbe;padding:9px;text-align:left}
+td{padding:9px;border-bottom:1px solid #484b51;vertical-align:top}
+.ts{color:#9a9da3;white-space:nowrap;width:180px}
+.author{color:#8ea1e1;white-space:nowrap;width:180px}
+.msg{word-break:break-word;white-space:normal}
 </style>
 </head>
 <body>
-<h1>📜 Transcript – #${escape(channel.name)}</h1>
-<p style="color:#72767d">${messages.length} message(s) exported on ${new Date().toUTCString()}</p>
+<h1>Ticket transcript – #${escapeHtml(channel.name)}</h1>
+<div class="meta">Ticket ID: ${escapeHtml(ticketData.id)} · ${messages.length} messages · Exported ${escapeHtml(new Date().toISOString())}</div>
 <table>
 <thead><tr><th>Timestamp (UTC)</th><th>Author</th><th>Message</th></tr></thead>
-<tbody>
-${rows}
-</tbody>
+<tbody>${htmlRows}</tbody>
 </table>
 </body>
 </html>`;
 
-    const buffer = Buffer.from(html, 'utf8');
-    const attachment = new AttachmentBuilder(buffer, { name: `ticket-${channel.id}.html` });
-
-    logger.info('✅ Successfully generated transcript', {
-      channelId: channel.id,
-      channelName: channel.name,
-      messageCount: messages.length,
-      size: buffer.length
+    const html = new AttachmentBuilder(Buffer.from(html, 'utf8'), {
+      name: 'ticket-' + channel.id + '.html',
+    });
+    const txt = new AttachmentBuilder(Buffer.from(plainLines.join('\n'), 'utf8'), {
+      name: 'ticket-' + channel.id + '.txt',
     });
 
-    return attachment;
+    logger.info('Generated HTML and TXT ticket transcripts', {
+      channelId: channel.id,
+      ticketNumber: ticketData.id,
+      messageCount: messages.length,
+      htmlBytes: html.attachment.length,
+      txtBytes: txt.attachment.length,
+    });
+
+    return { html, txt, messageCount: messages.length };
   } catch (error) {
-    logger.error('❌ Failed to generate transcript:', {
+    logger.error('Failed to generate ticket transcripts', {
       channelId: channel.id,
       channelName: channel.name,
       errorMessage: error.message,
       errorName: error.name,
-      errorStack: error.stack
     });
     return null;
   }
@@ -740,82 +767,94 @@ export async function deleteTicket(channel, deleter) {
           ticketId: ticketData.id
         });
 
-        let attachment = null;
-        try {
-          attachment = await generateTranscript(channel);
-          if (attachment) {
-            logger.info('Transcript generated successfully, attempting to send', {
-              channelId: channel.id,
-              ticketNumber: ticketData.id
-            });
-          } else {
-            logger.warn('Transcript generation returned null', {
-              channelId: channel.id,
-              ticketNumber: ticketData.id
-            });
-          }
-        } catch (transcriptError) {
-          logger.error('Error during transcript generation', {
+        const transcripts = await generateTranscripts(channel, ticketData);
+
+        if (!transcripts) {
+          logger.warn('Transcript generation failed; no transcript files were delivered', {
             channelId: channel.id,
             ticketNumber: ticketData.id,
-            error: transcriptError.message
           });
-        }
-
-        if (attachment) {
+        } else {
+          // The moderator log channel receives BOTH formats.
           try {
             const guildConfig = await getGuildConfig(channel.client, channel.guild.id);
             if (!guildConfig.ticketTranscriptChannelId) {
-              logger.warn('No transcript channel configured, skipping transcript send', {
+              logger.warn('No moderator transcript channel configured; skipping moderator transcript delivery', {
                 channelId: channel.id,
-                ticketNumber: ticketData.id
+                ticketNumber: ticketData.id,
               });
             } else {
               const transcriptChannel = await channel.client.channels.fetch(guildConfig.ticketTranscriptChannelId).catch(() => null);
-              
-              if (!transcriptChannel) {
-                logger.error('Could not fetch transcript channel', {
+              if (!transcriptChannel || !transcriptChannel.isSendable()) {
+                logger.error('Moderator transcript channel is unavailable or not sendable', {
                   channelId: channel.id,
-                  transcriptChannelId: guildConfig.ticketTranscriptChannelId
-                });
-              } else if (!transcriptChannel.isSendable()) {
-                logger.error('Transcript channel exists but is not sendable', {
-                  channelId: channel.id,
-                  transcriptChannelId: transcriptChannel.id
+                  transcriptChannelId: guildConfig.ticketTranscriptChannelId,
                 });
               } else {
-                
                 const transcriptEmbed = buildStandardLogEmbed({
                   color: 0x3498db,
-                  title: 'Ticket Transcript',
+                  title: 'Ticket Transcripts',
                   description: [
-                    formatLogLine('Ticket', `#${ticketData.id}`),
-                    formatLogLine('Channel', `#${channel.name}`),
-                    formatLogLine('Generated', `<t:${Math.floor(Date.now() / 1000)}:F>`),
+                    formatLogLine('Ticket', '#' + ticketData.id),
+                    formatLogLine('Channel', '#' + channel.name),
+                    formatLogLine('Author', '<@' + ticketData.userId + '>'),
+                    formatLogLine('Generated', '<t:' + Math.floor(Date.now() / 1000) + ':F>'),
+                    formatLogLine('Files', 'HTML and TXT'),
                   ].join('\n'),
                   footer: deleter?.username
-                    ? { text: `Deleted by ${deleter.username}`, iconURL: deleter.displayAvatarURL?.() }
+                    ? { text: 'Deleted by ' + deleter.username, iconURL: deleter.displayAvatarURL?.() }
                     : undefined,
                   timestamp: true,
                 });
 
                 await transcriptChannel.send({
                   embeds: [transcriptEmbed],
-                  files: [attachment]
+                  files: [transcripts.html, transcripts.txt],
+                  allowedMentions: { parse: [] },
                 });
 
-                logger.info('✅ Transcript sent successfully', {
+                logger.info('Sent HTML and TXT transcripts to moderator channel', {
                   channelId: channel.id,
                   ticketNumber: ticketData.id,
-                  transcriptChannelId: transcriptChannel.id
+                  transcriptChannelId: transcriptChannel.id,
                 });
               }
             }
           } catch (sendError) {
-            logger.error('Failed to send transcript to channel:', {
+            logger.error('Failed to send transcripts to moderator channel', {
               channelId: channel.id,
               ticketNumber: ticketData.id,
-              error: sendError.message
+              error: sendError.message,
+            });
+          }
+
+          // The ticket author receives TXT only. HTML is never sent by DM.
+          try {
+            const ticketAuthor = await channel.client.users.fetch(ticketData.userId).catch(() => null);
+            if (!ticketAuthor) {
+              logger.warn('Could not find ticket author for TXT transcript delivery', {
+                channelId: channel.id,
+                ticketNumber: ticketData.id,
+                userId: ticketData.userId,
+              });
+            } else {
+              await ticketAuthor.send({
+                content: 'Here is the TXT transcript of your ticket #' + ticketData.id + '.',
+                files: [transcripts.txt],
+                allowedMentions: { parse: [] },
+              });
+              logger.info('Sent TXT transcript to ticket author', {
+                channelId: channel.id,
+                ticketNumber: ticketData.id,
+                userId: ticketData.userId,
+              });
+            }
+          } catch (dmError) {
+            logger.warn('Could not DM TXT transcript to ticket author (their DMs may be closed)', {
+              channelId: channel.id,
+              ticketNumber: ticketData.id,
+              userId: ticketData.userId,
+              error: dmError.message,
             });
           }
         }
