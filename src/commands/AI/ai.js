@@ -322,11 +322,19 @@ export default {
           flags: MessageFlags.Ephemeral,
         });
       }
-      await client.db.delete(historyKey(interaction.guildId, interaction.user.id)).catch(() => {});
-      return interaction.reply({
-        content: 'Your saved Claude conversation history has been cleared.',
-        flags: MessageFlags.Ephemeral,
-      });
+      try {
+        await client.db.delete(historyKey(interaction.guildId, interaction.user.id));
+        return interaction.reply({
+          content: 'Your saved Claude conversation history has been cleared.',
+          flags: MessageFlags.Ephemeral,
+        });
+      } catch (error) {
+        logger.error('Could not clear AI conversation history', { error: error.message });
+        return interaction.reply({
+          content: 'I could not clear your conversation history. Please try again later.',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
     }
 
     if (subcommand === 'user') {
@@ -391,6 +399,12 @@ export default {
         });
       }
 
+      if (!channelContext.trim()) {
+        return interaction.reply({
+          content: 'There are no recent text messages available to summarize.',
+          flags: MessageFlags.Ephemeral,
+        });
+      }
       const question = 'Summarize the recent messages in #' + (interaction.channel?.name || 'this channel') + '. Identify the main topics and clear action items. Do not guess missing context.';
       return askClaude(interaction, client, question, { channelContext, isPublic });
     }
