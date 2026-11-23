@@ -307,6 +307,8 @@ export default {
             }
           }
         } else if (interaction.isButton()) {
+          // These buttons are handled by the local confirmation collector inside the AI command.
+          if (interaction.customId.startsWith('ai_confirm:')) return;
           if (interaction.customId.startsWith('shared_todo_')) {
             const parts = interaction.customId.split('_');
             const buttonType = parts.slice(0, 3).join('_');
