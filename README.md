@@ -14,6 +14,7 @@ A multi-feature Discord bot built with Node.js, Discord.js v14 and persistent JS
 - Server statistics and temporary voice channels
 - Music through Riffy and Lavalink nodes
 - Utility, fun, search and administration commands
+- Claude AI assistant with web search, BoberBuilders knowledge, private conversation history, channel summaries and public member lookups
 - Web health endpoints at `/health` and `/ready`
 
 ## Deploy on Bot-Hosting.net
@@ -27,6 +28,23 @@ A multi-feature Discord bot built with Node.js, Discord.js v14 and persistent JS
 5. Start the server. No SQL credentials, database deployment, or migration command are needed.
 
 Optional: set `OWNER_IDS` to comma-separated Discord user IDs for owner-only commands. `BOT_DATA_DIR` changes the data folder; by default it is `./data`.
+
+### Claude AI setup
+
+Add `ANTHROPIC_API_KEY` as a Secret environment variable in your hosting panel. Optional settings:
+
+- `ANTHROPIC_MODEL` — Claude model ID (default: `claude-haiku-5-5`).
+- `BOBERBUILDERS_AGENTINFO_URL` — official BoberBuilders knowledge document (default: `https://boberbuilders.pl/agentinfo.md`).
+
+AI commands:
+
+- `/ai ask` — ask Claude; optionally include recent channel messages and a member's basic public profile. Answers are posted publicly by default, with a private reply option.
+- `/ai summarize` — summarize recent messages in the current channel. Private by default.
+- `/ai history` — view your own saved Claude conversations (only visible to you).
+- `/ai clear` — delete your own saved Claude conversation history.
+- `/ai user` — view a member's basic public Discord profile.
+
+Conversation history is stored separately for each user and server. The bot stores up to eight recent exchanges per user. Channel context is only included when explicitly requested with the `include_chat` option.
 
 ## Data and restarts
 

@@ -1,8 +1,10 @@
 /**
- * Command category metadata for the command access manager.
+ * Shared command category metadata.
+ * Keep this as the single source of truth for category names and icons.
  */
 
 export const CATEGORY_ICONS = {
+  AI: '🤖',
   Birthday: '🎂',
   Community: '👥',
   Core: 'ℹ️',
@@ -24,7 +26,6 @@ export const CATEGORY_ICONS = {
   Welcome: '👋',
 };
 
-/** Commands that always stay available so admins can recover access. */
 export const PROTECTED_COMMANDS = new Set(['commands', 'configwizard']);
 
 export function normalizeCategoryKey(category) {
@@ -38,7 +39,7 @@ export function formatCategoryName(rawCategory) {
   return String(rawCategory || '')
     .replace(/_/g, ' ')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+    .replace(/\b\w/g, char => char.toUpperCase());
 }
 
 export function getCategoryIcon(category) {
